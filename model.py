@@ -59,8 +59,8 @@ class AudioDataset(Dataset):
         testData = self.data[int(0.8*len(self.data)):]
         # batch data - need to make this work, may need to do it manually, and ought to 
         # pad data to make each sequence of the same length, at least within a batch
-        self.trainLoader = torch.utils.data.DataLoader(trainData, batch_size=16, shuffle=True)
-        self.testLoader = torch.utils.data.DataLoader(testData, batch_size=16, shuffle=True)
+        self.trainLoader = torch.utils.data.DataLoader(trainData, batch_size=16, shuffle=True) # type: ignore
+        self.testLoader = torch.utils.data.DataLoader(testData, batch_size=16, shuffle=True) # type: ignore
         
 
     def __len__(self):
@@ -73,7 +73,7 @@ class AudioDataset(Dataset):
 def main():
     fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True)
     fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True)
-    data = concatenate_datasets([fleurs_korean, fleurs_english])
+    data = concatenate_datasets([fleurs_korean, fleurs_english]) # type: ignore
     data = AudioDataset(data)
     
     model = Model()
