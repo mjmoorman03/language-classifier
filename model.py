@@ -2,20 +2,21 @@ from datasets import load_dataset, concatenate_datasets
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
+import numpy as np
 
 
 class Model(torch.nn.Module):
     def __init__(self):
-        self.numClasses = 2
-        self.hiddenSize = 12
+        self.hiddenSize = 2
         self.inputSize = 1
         super(Model, self).__init__()
-        self.rnn = torch.nn.RNN(input_size=self.inputSize, hidden_size=self.hiddenSize, num_layers=1)
-        self.fc1 = torch.nn.Linear(self.hiddenSize, self.numClasses)
+        self.rnn = torch.nn.RNN(input_size=self.inputSize, hidden_size=self.hiddenSize, num_layers=1, batch_first=False)
+        self.fc1 = torch.nn.Linear(self.hiddenSize, self.hiddenSize)
     
 
     def forward(self, x):
         x, _ = self.rnn(x)
+        x = x[-1]
         x = self.fc1(x)
         # not sure if softmax necessary or beneficial 
         x = torch.nn.functional.softmax(x, dim=1)
@@ -44,16 +45,23 @@ class AudioDataset(Dataset):
         for i in range(len(data)):
             if data[i]['audio']['sampling_rate'] != 16000:
                 raise ValueError('Invalid sampling rate')
+            arrays.append(torch.tensor(data[i]['audio']['array']).reshape(-1, 1, 1).type(torch.float32))
             # make label 0 for Korean, 1 for English
-            arrays.append(data[i]['audio']['array'])
             if data[i]['language'] == 'Korean':
-                labels.append(0)
+                labels.append(torch.tensor([0]))
             elif data[i]['language'] == 'English':
-                labels.append(1)
+                labels.append(torch.tensor([1]))
             else:
                 raise ValueError('Invalid language')
-        dataDict = {'data': arrays, 'labels': labels}
-        self.data = pd.DataFrame(dataDict)
+        self.data = list(zip(arrays, labels))
+        # make about 80% of data training data
+        trainData = self.data[:int(0.8*len(self.data))]
+        testData = self.data[int(0.8*len(self.data)):]
+        # batch data - need to make this work, may need to do it manually, and ought to 
+        # pad data to make each sequence of the same length, at least within a batch
+        self.trainLoader = torch.utils.data.DataLoader(trainData, batch_size=16, shuffle=True)
+        self.testLoader = torch.utils.data.DataLoader(testData, batch_size=16, shuffle=True)
+        
 
     def __len__(self):
         return len(self.data)
