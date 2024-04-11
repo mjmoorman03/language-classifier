@@ -3,7 +3,10 @@ import torch
 from torch.utils.data import Dataset
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
 
+if torch.backends.mps.is_available():
+    mps_device = torch.device("mps")
 
 class Model(torch.nn.Module):
     def __init__(self):
@@ -42,10 +45,16 @@ class AudioDataset(Dataset):
     def __init__(self, data):
         arrays = []
         labels = []
+        maxLength = 0
+        for i in range(len(data)):
+            maxLength = max(maxLength, len(data[i]['audio']['array']))
         for i in range(len(data)):
             if data[i]['audio']['sampling_rate'] != 16000:
                 raise ValueError('Invalid sampling rate')
-            arrays.append(torch.tensor(data[i]['audio']['array']).reshape(-1, 1, 1).type(torch.float32))
+            tensor = torch.tensor(data[i]['audio']['array']).type(torch.float32)
+            # pad data
+            tensor = torch.nn.functional.pad(tensor, (0, maxLength - len(tensor)))
+            arrays.append(tensor)
             # make label 0 for Korean, 1 for English
             if data[i]['language'] == 'Korean':
                 labels.append(torch.tensor([0]))
@@ -53,21 +62,24 @@ class AudioDataset(Dataset):
                 labels.append(torch.tensor([1]))
             else:
                 raise ValueError('Invalid language')
-        self.data = list(zip(arrays, labels))
-        # make about 80% of data training data
-        trainData = self.data[:int(0.8*len(self.data))]
-        testData = self.data[int(0.8*len(self.data)):]
-        # batch data - need to make this work, may need to do it manually, and ought to 
-        # pad data to make each sequence of the same length, at least within a batch
-        self.trainLoader = torch.utils.data.DataLoader(trainData, batch_size=16, shuffle=True) # type: ignore
-        self.testLoader = torch.utils.data.DataLoader(testData, batch_size=16, shuffle=True) # type: ignore
+        # split data
+        xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=42)
+        xTrain = torch.stack(xTrain)
+        xTest = torch.stack(xTest)
+        yTrain = torch.stack(yTrain)
+        yTest = torch.stack(yTest)
+        trainData = torch.utils.data.TensorDataset(xTrain, yTrain) # type: ignore
+        testData = torch.utils.data.TensorDataset(xTest, yTest) # type: ignore
         
+        self.trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=32, shuffle=True) # type: ignore
+        self.testLoader = torch.utils.data.DataLoader(dataset=testData, batch_size=32, shuffle=False) # type: ignore
+        print('Data loaded')
 
     def __len__(self):
-        return len(self.data)
+        return len(self.trainLoader)
     
     def __getitem__(self, idx):
-        return self.data[idx]
+        return self.trainLoader[idx]
 
 
 def main():
@@ -77,6 +89,7 @@ def main():
     data = AudioDataset(data)
     
     model = Model()
+    model.to(mps_device)
     model.train(data)
     torch.save(model.state_dict(), 'model.pth')
 
