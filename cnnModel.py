@@ -164,5 +164,8 @@ def main():
     model.test(testLoader)
     torch.save(model.state_dict(), 'model.pth')
     
-main()
+# need to write a function that allows us to test our own audio files
+
+if __name__ == '__main__':
+    main()
 
