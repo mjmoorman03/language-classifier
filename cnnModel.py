@@ -7,12 +7,13 @@ import scipy.io.wavfile as wav
 import os
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
-import random
+
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
     
 
 BATCH_SIZE = 32
+NUM_EPOCHS = 20
 
 class Model(torch.nn.Module):
     def __init__(self):
@@ -34,9 +35,10 @@ class Model(torch.nn.Module):
     
 
     def train(self, trainLoader):
+        losses = []
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
         criterion = torch.nn.CrossEntropyLoss()
-        for epoch in range(100):
+        for epoch in range(NUM_EPOCHS):
             for i, (trainData, trainLabels) in enumerate(trainLoader, 0):
                 trainData, trainLabels = trainData.to(device), trainLabels.to(device)
                 optimizer.zero_grad()
@@ -45,9 +47,28 @@ class Model(torch.nn.Module):
                 trainLabels = trainLabels.squeeze(1)
                 # unclear on shape of outputs and trainLabels, if we need to take argmax of output first
                 loss = criterion(outputs, trainLabels)
+                losses.append(loss.item())
                 loss.backward()
                 optimizer.step()
-            print('Epoch [%d/100], Loss: %.4f' % (epoch+1, loss.item()))
+            print(f'Epoch [%d/{NUM_EPOCHS}], Loss: %.4f' % (epoch+1, loss.item()))
+        return losses
+
+        
+    def test(self, testLoader):
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data in testLoader:
+                testInputs, testLabels = data
+                testInputs, testLabels = testInputs.to(device), testLabels.to(device)
+                testInputs = testInputs.unsqueeze(1)
+                outputs = self(testInputs)
+                predicted = torch.argmax(outputs, 1)
+                testLabels = testLabels.squeeze(1)
+                total += testLabels.size(0)
+                correct += (predicted == testLabels).sum().item()
+        print(f'Accuracy of the network on the test data: {100 * correct/total}')
+        return 100 * correct / total
 
 
 def transformAudio(audio, samplingRate):
@@ -122,6 +143,14 @@ def createDataloader(data):
     return (trainLoader, testLoader)
 
 
+def graphLoss(losses):
+    plt.plot(losses)
+    
+    plt.xlabel('Batch')
+    plt.ylabel('Loss')
+    plt.show()
+
+
 def main():
     fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True)
     fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True)
@@ -130,7 +159,9 @@ def main():
     
     model = Model()
     model.to(device)
-    model.train(trainLoader)
+    losses = model.train(trainLoader)
+    graphLoss(losses)
+    model.test(testLoader)
     torch.save(model.state_dict(), 'model.pth')
     
 main()
