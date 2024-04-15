@@ -165,6 +165,8 @@ def main():
     torch.save(model.state_dict(), 'model.pth')
     
 # need to write a function that allows us to test our own audio files
+# also one to save model only if accuracy has increased, based on a saved file
+# and saves model with a name based on what languages it was trained on
 
 if __name__ == '__main__':
     main()
