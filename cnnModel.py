@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
+import json
 
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
@@ -14,6 +15,7 @@ NUM_EPOCHS = 30
 LEARNING_RATE = 0.001
 NUM_FILTERS = 2
 NUM_SECOND_FILTERS = 2
+LANGUAGES = ['Korean', 'English']
 
 class Model(torch.nn.Module):
     def __init__(self):
@@ -145,10 +147,23 @@ def createDataloader(data):
 
 def graphLoss(losses):
     plt.plot(losses)
-    
     plt.xlabel('Batch')
     plt.ylabel('Loss')
     plt.show()
+
+
+def saveModelAccuracy(model, accuracy):
+    langs = ''
+    for lang in LANGUAGES:
+        langs += lang + '_'
+    # open accuracies.json and save accuracy if higher than previous
+    with open('accuracies.json', 'r') as f:
+        data = json.load(f)
+    if langs not in data.keys() or float(data[langs]) < accuracy:
+        torch.save(model.state_dict(), f'{langs}model.pth')
+        data[langs] = str(accuracy)
+        with open('accuracies.json', 'w') as f:
+            json.dump(data, f)
 
 
 def main():
@@ -159,10 +174,9 @@ def main():
     
     model = Model()
     model.to(device)
-    losses = model.train(trainLoader)
-    graphLoss(losses)
-    model.test(testLoader)
-    torch.save(model.state_dict(), 'model.pth')
+    model.train(trainLoader)
+    accuracy = model.test(testLoader)
+    saveModelAccuracy(model, accuracy)
     
 # need to write a function that allows us to test our own audio files
 # also one to save model only if accuracy has increased, based on a saved file
