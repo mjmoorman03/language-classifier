@@ -3,24 +3,24 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from sklearn.model_selection import train_test_split
-import scipy.io.wavfile as wav
-import os
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
-    
 
-BATCH_SIZE = 32
-NUM_EPOCHS = 20
+BATCH_SIZE = 16
+NUM_EPOCHS = 30
+LEARNING_RATE = 0.001
+NUM_FILTERS = 2
+NUM_SECOND_FILTERS = 2
 
 class Model(torch.nn.Module):
     def __init__(self):
         super(Model, self).__init__()
-        self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
-        self.cnn2 = torch.nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
-        self.fc1 = torch.nn.Linear(22000, 2)
+        self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.fc1 = torch.nn.Linear(22000 * NUM_SECOND_FILTERS, 2)
     
 
     def forward(self, x):
@@ -36,7 +36,7 @@ class Model(torch.nn.Module):
 
     def train(self, trainLoader):
         losses = []
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=LEARNING_RATE)
         criterion = torch.nn.CrossEntropyLoss()
         for epoch in range(NUM_EPOCHS):
             for i, (trainData, trainLabels) in enumerate(trainLoader, 0):
@@ -138,8 +138,8 @@ def createDataloader(data):
     trainData = torch.utils.data.TensorDataset(xTrain, yTrain) # type: ignore
     testData = torch.utils.data.TensorDataset(xTest, yTest) # type: ignore
         
-    trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=32, shuffle=True) # type: ignore
-    testLoader = torch.utils.data.DataLoader(dataset=testData, batch_size=32, shuffle=False) # type: ignore
+    trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=BATCH_SIZE, shuffle=True) # type: ignore
+    testLoader = torch.utils.data.DataLoader(dataset=testData, batch_size=BATCH_SIZE, shuffle=False) # type: ignore
     return (trainLoader, testLoader)
 
 
