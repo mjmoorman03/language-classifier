@@ -2,6 +2,7 @@ import pyaudio
 import time
 import torch
 import numpy as np
+import sys
 
 # Need to brew install portaudio before pip install pyaudio
 def audioInput():

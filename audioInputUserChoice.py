@@ -28,7 +28,7 @@ def audioInput():
     # RECORD_SECONDS = 10
     CHUNK = 1024
     RATE = 16000
-    FORMAT = pyaudio.paInt16
+    FORMAT = pyaudio.paFloat32
     maxLength = 16000 * 11
 
     p = pyaudio.PyAudio()
