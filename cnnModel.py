@@ -6,13 +6,14 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 import json
-import audioInput
+import audioInputUserChoice as audioInput
 
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
 
 BATCH_SIZE = 16
 NUM_EPOCHS = 30
+MAX_LENGTH = 16000 * 11
 LEARNING_RATE = 0.001
 NUM_FILTERS = 2
 NUM_SECOND_FILTERS = 2
@@ -113,16 +114,14 @@ def plotSpectrogramFromFFT(audio, samplingRate):
 def createDataloader(data):
     arrays = []
     labels = []
-    maxLength = 0
     # max seconds 
-    maxLength = 16000 * 11
     for i in range(len(data)):
         # pad or truncate data to 11 seconds
         tensor = torch.tensor(data[i]['audio']['array']).type(torch.float32)
-        if len(tensor) > maxLength:
-            tensor = tensor[:maxLength]
-        elif maxLength - len(tensor) > 0:
-            tensor = torch.nn.functional.pad(tensor, (0, maxLength - len(tensor)))
+        if len(tensor) > MAX_LENGTH:
+            tensor = tensor[:MAX_LENGTH]
+        elif MAX_LENGTH - len(tensor) > 0:
+            tensor = torch.nn.functional.pad(tensor, (0, MAX_LENGTH - len(tensor)))
         transformed = transformAudio(tensor, data[i]['audio']['sampling_rate'])
         arrays.append(torch.tensor(transformed).type(torch.float32))
         # labels for languages to indices
@@ -176,17 +175,25 @@ def loadModel(languages=LANGUAGES):
 
 
 def evaluateAudio(model, audio, samplingRate):
+    audio = torch.tensor(audio).type(torch.float32)
+    if len(audio) > MAX_LENGTH:
+        audio = audio[:MAX_LENGTH]
+    elif MAX_LENGTH - len(audio) > 0:
+        audio = torch.nn.functional.pad(audio, (0, MAX_LENGTH - len(audio)))
     transformed = transformAudio(audio, samplingRate)
     transformed = torch.tensor(transformed).type(torch.float32)
     transformed = transformed.unsqueeze(0).unsqueeze(1)
+    print(transformed.shape)
+    plotSpectrogramFromFFT(audio, samplingRate)
     transformed = transformed.to(device)
     outputs = model(transformed)
-    predicted = int(torch.argmax(outputs, 1).item())
+    print(outputs)
+    predicted = torch.argmax(outputs, 1)
     return LANGUAGES[predicted]
 
 
 def classifyMicrophoneInput(model):
-    audio = audioInput.audioInput()
+    audio = audioInput.audioInputUserChoice()
     return evaluateAudio(model, audio, 16000)
 
 
