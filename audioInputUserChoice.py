@@ -71,7 +71,7 @@ def wait_for_input():
     time.sleep(1)
     wait = input('Press enter to stop recording\n')
 
-def main():
+def audioInputUserChoice():
     global thread_running
     t1 = ThreadWithReturnValue(target=audioInput)
     t2 = Thread(target=wait_for_input)
@@ -84,7 +84,7 @@ def main():
     return (t1.join())
 
 if __name__ == '__main__':
-    main()
+    audioInputUserChoice()
 
 
 
