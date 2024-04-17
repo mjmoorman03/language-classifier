@@ -1,5 +1,6 @@
 import pyaudio
 import time
+import torch
 
 # Need to brew install portaudio before pip install pyaudio
 def audioInput():
@@ -33,6 +34,8 @@ def audioInput():
     stream.close()
     p.terminate()
 
-    return frames
+    audio = torch.tensor(frames.type(torch.float32))
+    return audio
 
-audioInput()
+if __name__ == '__main__':
+    audioInput()
