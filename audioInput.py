@@ -6,7 +6,7 @@ import numpy as np
 # Need to brew install portaudio before pip install pyaudio
 def audioInput():
     CHANNELS = 1
-    RECORD_SECONDS = 5
+    RECORD_SECONDS = 11
     CHUNK = 1024
     RATE = 16000
     FORMAT = pyaudio.paFloat32
