@@ -1,14 +1,15 @@
 import pyaudio
 import time
 import torch
+import numpy as np
 
 # Need to brew install portaudio before pip install pyaudio
 def audioInput():
     CHANNELS = 1
-    RECORD_SECONDS = 10
+    RECORD_SECONDS = 5
     CHUNK = 1024
     RATE = 16000
-    FORMAT = pyaudio.paInt16
+    FORMAT = pyaudio.paFloat32
 
     p = pyaudio.PyAudio()
 
@@ -24,17 +25,18 @@ def audioInput():
                     input=True,
                     frames_per_buffer=CHUNK)
     print('Recording\n')
-    frames = []
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    frames = bytearray()
+    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
         data = stream.read(CHUNK)
-        frames.append(data)
+        frames.extend(data)
 
     print('Recording finished\n')
     stream.stop_stream()
     stream.close()
     p.terminate()
+    frames = np.frombuffer(frames, dtype=np.float32)
 
-    audio = torch.tensor(frames.type(torch.float32))
+    audio = torch.tensor(frames, dtype = torch.float32)
     return audio
 
 if __name__ == '__main__':
