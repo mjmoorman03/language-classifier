@@ -4,3 +4,4 @@ matplotlib
 datasets
 soundfile
 librosa
+pyaudio

@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 import json
+import audioInput
 
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
@@ -15,14 +16,14 @@ NUM_EPOCHS = 30
 LEARNING_RATE = 0.001
 NUM_FILTERS = 2
 NUM_SECOND_FILTERS = 2
-LANGUAGES = ['Korean', 'English']
+LANGUAGES = ['Korean', 'English', 'Spanish']
 
 class Model(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, numLanguages):
         super(Model, self).__init__()
         self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
-        self.fc1 = torch.nn.Linear(22000 * NUM_SECOND_FILTERS, 2)
+        self.fc1 = torch.nn.Linear(22000 * NUM_SECOND_FILTERS, numLanguages)
     
 
     def forward(self, x):
@@ -124,13 +125,11 @@ def createDataloader(data):
             tensor = torch.nn.functional.pad(tensor, (0, maxLength - len(tensor)))
         transformed = transformAudio(tensor, data[i]['audio']['sampling_rate'])
         arrays.append(torch.tensor(transformed).type(torch.float32))
-        # make label 0 for Korean, 1 for English
-        if data[i]['language'] == 'Korean':
-            labels.append(torch.tensor([0]))
-        elif data[i]['language'] == 'English':
-            labels.append(torch.tensor([1]))
+        # labels for languages to indices
+        if data[i]['language'] in LANGUAGES:
+            labels.append(torch.tensor([LANGUAGES.index(data[i]['language'])]))
         else:
-            raise ValueError('Invalid language')            
+            raise ValueError('Invalid language')      
        
     xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=42)
     xTrain = torch.stack(xTrain)
@@ -166,21 +165,49 @@ def saveModelAccuracy(model, accuracy):
             json.dump(data, f)
 
 
-def main():
-    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True)
-    fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True)
-    data = concatenate_datasets([fleurs_korean, fleurs_english]) # type: ignore
+def loadModel(languages=LANGUAGES):
+    model = Model(len(languages))
+    pathName = ''
+    for lang in languages:
+        pathName += lang + '_'
+    model.to(device)
+    model.load_state_dict(torch.load(f'{pathName}model.pth'))
+    return model
+
+
+def evaluateAudio(model, audio, samplingRate):
+    transformed = transformAudio(audio, samplingRate)
+    transformed = torch.tensor(transformed).type(torch.float32)
+    transformed = transformed.unsqueeze(0).unsqueeze(1)
+    transformed = transformed.to(device)
+    outputs = model(transformed)
+    predicted = int(torch.argmax(outputs, 1).item())
+    return LANGUAGES[predicted]
+
+
+def classifyMicrophoneInput(model):
+    audio = audioInput.audioInput()
+    return evaluateAudio(model, audio, 16000)
+
+
+def mainTrain():
+    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
+    fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
+    fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train', trust_remote_code=True)
+    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
     trainLoader, testLoader = createDataloader(data)
     
-    model = Model()
+    model = Model(len(LANGUAGES))
     model.to(device)
     model.train(trainLoader)
     accuracy = model.test(testLoader)
     saveModelAccuracy(model, accuracy)
-    
-# need to write a function that allows us to test our own audio files
-# also one to save model only if accuracy has increased, based on a saved file
-# and saves model with a name based on what languages it was trained on
+
+
+def main():
+    model = loadModel(['Korean', 'English', 'Spanish'])
+    print(classifyMicrophoneInput(model))
+
 
 if __name__ == '__main__':
     main()
