@@ -12,11 +12,13 @@ import audioInputUserChoice as audioInput
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
 
 BATCH_SIZE = 16
-NUM_EPOCHS = 30
+NUM_EPOCHS = 10
 MAX_LENGTH = 16000 * 11
 LEARNING_RATE = 0.001
-NUM_FILTERS = 2
-NUM_SECOND_FILTERS = 2
+NUM_FILTERS = 16
+NUM_SECOND_FILTERS = 32
+NUM_THIRD_FILTERS = 64
+NUM_FOURTH_FILTERS = 128
 LANGUAGES = ['Korean', 'English', 'Spanish']
 
 class Model(torch.nn.Module):
@@ -24,17 +26,31 @@ class Model(torch.nn.Module):
         super(Model, self).__init__()
         self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
-        self.cnn3 = torch.nn.Conv2d(in_channels=NUM_SECOND_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
-        self.fc1 = torch.nn.Linear(11000, numLanguages)
+        self.cnn3 = torch.nn.Conv2d(in_channels=NUM_SECOND_FILTERS, out_channels=NUM_THIRD_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.cnn4 = torch.nn.Conv2d(in_channels=NUM_THIRD_FILTERS, out_channels=NUM_FOURTH_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.fc1 = torch.nn.Linear(1250 * NUM_FOURTH_FILTERS, numLanguages)
+        self.batchNorm1 = torch.nn.BatchNorm2d(NUM_FILTERS)
+        self.batchNorm2 = torch.nn.BatchNorm2d(NUM_SECOND_FILTERS)
+        self.batchNorm3 = torch.nn.BatchNorm2d(NUM_THIRD_FILTERS)
+        self.batchNorm4 = torch.nn.BatchNorm2d(NUM_FOURTH_FILTERS)
     
 
     def forward(self, x):
         x = self.cnn1(x)
-        # max pooling
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm1(x)
         x = torch.nn.functional.max_pool2d(x, 2)
         x = self.cnn2(x)
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm2(x)
         x = torch.nn.functional.max_pool2d(x, 2)
         x = self.cnn3(x)
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm3(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.cnn4(x)
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm4(x)
         x = torch.nn.functional.max_pool2d(x, 2)
         x = x.reshape(x.size(0), -1)
         x = self.fc1(x)
@@ -132,7 +148,7 @@ def createDataloader(data):
         else:
             raise ValueError('Invalid language')      
        
-    xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=42)
+    xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=None)
     xTrain = torch.stack(xTrain)
     xTest = torch.stack(xTest)
     yTrain = torch.stack(yTrain)
@@ -199,6 +215,22 @@ def classifyMicrophoneInput(model):
     return evaluateAudio(model, audio, 16000)
 
 
+def saveResults(model, accuracy):
+    langs = ''
+    for lang in LANGUAGES:
+        langs += lang + '_'
+    # open results.json and save model summary and accuracy
+    with open('results.json', 'r+') as f:
+        data = json.load(f)
+        index = len(data)
+        data[index] = {}
+        data[index]['model'] = str(model)
+        data[index]['accuracy'] = str(accuracy)
+        data[index]['languages'] = langs
+        f.seek(0)
+        json.dump(data, f)
+
+
 def mainTrain():
     fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
     fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
@@ -211,11 +243,11 @@ def mainTrain():
     model.train(trainLoader)
     accuracy = model.test(testLoader)
     saveModelAccuracy(model, accuracy)
+    saveResults(model, accuracy)
 
 
 def main():
-    model = loadModel()
-    print(classifyMicrophoneInput(model))
+    mainTrain()
 
 
 if __name__ == '__main__':
