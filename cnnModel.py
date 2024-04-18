@@ -57,7 +57,7 @@ class Model(torch.nn.Module):
         return x
     
 
-    def train(self, trainLoader):
+    def trainFunction(self, trainLoader):
         losses = []
         optimizer = torch.optim.Adam(self.parameters(), lr=LEARNING_RATE)
         criterion = torch.nn.CrossEntropyLoss()
@@ -240,14 +240,17 @@ def mainTrain():
     
     model = Model(len(LANGUAGES))
     model.to(device)
-    model.train(trainLoader)
+    model.trainFunction(trainLoader)
     accuracy = model.test(testLoader)
     saveModelAccuracy(model, accuracy)
     saveResults(model, accuracy)
 
 
 def main():
-    mainTrain()
+    model = loadModel()
+    model.to(device)
+    model.eval()
+    print(classifyMicrophoneInput(model))
 
 
 if __name__ == '__main__':
