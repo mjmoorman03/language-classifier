@@ -60,6 +60,7 @@ def audioInput():
 
     frames = np.frombuffer(frames, dtype=np.float32)
     tensor = torch.tensor(frames, dtype= torch.float32)
+    print(tensor)
 
     if len(tensor) > maxLength:
             tensor = tensor[:maxLength]

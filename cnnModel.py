@@ -24,7 +24,8 @@ class Model(torch.nn.Module):
         super(Model, self).__init__()
         self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
-        self.fc1 = torch.nn.Linear(22000 * NUM_SECOND_FILTERS, numLanguages)
+        self.cnn3 = torch.nn.Conv2d(in_channels=NUM_SECOND_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.fc1 = torch.nn.Linear(11000, numLanguages)
     
 
     def forward(self, x):
@@ -32,6 +33,8 @@ class Model(torch.nn.Module):
         # max pooling
         x = torch.nn.functional.max_pool2d(x, 2)
         x = self.cnn2(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.cnn3(x)
         x = torch.nn.functional.max_pool2d(x, 2)
         x = x.reshape(x.size(0), -1)
         x = self.fc1(x)
@@ -43,7 +46,7 @@ class Model(torch.nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=LEARNING_RATE)
         criterion = torch.nn.CrossEntropyLoss()
         for epoch in range(NUM_EPOCHS):
-            for i, (trainData, trainLabels) in enumerate(trainLoader, 0):
+            for _, (trainData, trainLabels) in enumerate(trainLoader, 0):
                 trainData, trainLabels = trainData.to(device), trainLabels.to(device)
                 optimizer.zero_grad()
                 trainData = trainData.unsqueeze(1)
@@ -94,7 +97,6 @@ def plotSpectrogramFromFFT(audio, samplingRate):
                                scale_to='magnitude', phase_shift=None)
     transformed = SFT.stft(audio)
     N = len(audio)
-    t_lo, t_hi, f_lo, f_hi = SFT.extent(N, center_bins=True)
     fig1, axx = plt.subplots(1, 1, sharex='all', sharey='all',
                             figsize=(6., 5.))  # enlarge figure a bit
     axx.set_title(r"ShortTimeFFT produces $%d\times%d$ points" % transformed.T.shape)
@@ -212,7 +214,7 @@ def mainTrain():
 
 
 def main():
-    model = loadModel(['Korean', 'English', 'Spanish'])
+    model = loadModel()
     print(classifyMicrophoneInput(model))
 
 
