@@ -2,6 +2,7 @@ import pyaudio
 import time
 from threading import Thread
 import torch
+import numpy as np
 
 # Need to brew install portaudio before pip install pyaudio
 
@@ -57,7 +58,9 @@ def audioInput():
     stream.close()
     p.terminate()
 
+    frames = np.frombuffer(frames, dtype=np.float32)
     tensor = torch.tensor(frames, dtype= torch.float32)
+
     if len(tensor) > maxLength:
             tensor = tensor[:maxLength]
     elif maxLength - len(tensor) > 0:
