@@ -6,13 +6,16 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 import json
+import librosa
+import scipy
 import audioInputUserChoice as audioInput
-
+import pyaudio
+import soundfile as sf
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
 
 BATCH_SIZE = 16
-NUM_EPOCHS = 10
+NUM_EPOCHS = 5
 MAX_LENGTH = 16000 * 11
 LEARNING_RATE = 0.001
 NUM_FILTERS = 16
@@ -104,8 +107,7 @@ def transformAudio(audio, samplingRate):
     return transformed
 
 
-def plotSpectrogramFromFFT(audio, samplingRate):
-    # apply activation function to audio    
+def plotSpectrogramFromFFT(audio, samplingRate): 
     nperseg = 4000
     noverlap = 2000
     win = ('gaussian', 1e-2 * samplingRate)
@@ -129,24 +131,32 @@ def plotSpectrogramFromFFT(audio, samplingRate):
     plt.show()
 
 
+def spectrogramToAudio(spectrogram):
+    audio_signal = librosa.core.spectrum.griffinlim(spectrogram, dtype=np.float32)
+    audio_signal = audio_signal 
+    print("reconstructed audio:", audio_signal)
+    scipy.io.wavfile.write('reconstructed_audio.wav', 16000, audio_signal)
+
+
 def createDataloader(data):
     arrays = []
     labels = []
     # max seconds 
     for i in range(len(data)):
         # pad or truncate data to 11 seconds
+        scipy.io.wavfile.write('audio.wav', 16000, data[i]['audio']['array'])
         tensor = torch.tensor(data[i]['audio']['array']).type(torch.float32)
         if len(tensor) > MAX_LENGTH:
             tensor = tensor[:MAX_LENGTH]
         elif MAX_LENGTH - len(tensor) > 0:
             tensor = torch.nn.functional.pad(tensor, (0, MAX_LENGTH - len(tensor)))
         transformed = transformAudio(tensor, data[i]['audio']['sampling_rate'])
-        arrays.append(torch.tensor(transformed).type(torch.float32))
+        arrays.append(torch.tensor(abs(transformed)).type(torch.float32))
         # labels for languages to indices
         if data[i]['language'] in LANGUAGES:
             labels.append(torch.tensor([LANGUAGES.index(data[i]['language'])]))
         else:
-            raise ValueError('Invalid language')      
+            raise ValueError('Invalid language')    
        
     xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=None)
     xTrain = torch.stack(xTrain)
@@ -193,17 +203,12 @@ def loadModel(languages=LANGUAGES):
 
 
 def evaluateAudio(model, audio, samplingRate):
-    audio = torch.tensor(audio).type(torch.float32)
-    if len(audio) > MAX_LENGTH:
-        audio = audio[:MAX_LENGTH]
-    elif MAX_LENGTH - len(audio) > 0:
-        audio = torch.nn.functional.pad(audio, (0, MAX_LENGTH - len(audio)))
     transformed = transformAudio(audio, samplingRate)
     transformed = torch.tensor(transformed).type(torch.float32)
-    transformed = transformed.unsqueeze(0).unsqueeze(1)
-    print(transformed.shape)
-    plotSpectrogramFromFFT(audio, samplingRate)
+    spectrogramToAudio(transformed)
     transformed = transformed.to(device)
+    transformed = transformed.unsqueeze(0).unsqueeze(1)
+    plotSpectrogramFromFFT(audio, samplingRate)
     outputs = model(transformed)
     print(outputs)
     predicted = torch.argmax(outputs, 1)
@@ -235,6 +240,7 @@ def mainTrain():
     fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
     fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
     fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train', trust_remote_code=True)
+    # fleurs_vietnamese = load_dataset('google/fleurs', "vi_vn", split='train', trust_remote_code=True)
     data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
     trainLoader, testLoader = createDataloader(data)
     
@@ -248,8 +254,6 @@ def mainTrain():
 
 def main():
     model = loadModel()
-    model.to(device)
-    model.eval()
     print(classifyMicrophoneInput(model))
 
 
