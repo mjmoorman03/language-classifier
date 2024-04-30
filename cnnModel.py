@@ -22,6 +22,9 @@ NUM_FILTERS = 16
 NUM_SECOND_FILTERS = 32
 NUM_THIRD_FILTERS = 64
 NUM_FOURTH_FILTERS = 128
+SAMPLING_RATE = 16000
+NPERSEG = 256
+NOVERLAP = 128
 LANGUAGES = ['Korean', 'English', 'Spanish']
 
 class Model(torch.nn.Module):
@@ -31,7 +34,7 @@ class Model(torch.nn.Module):
         self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn3 = torch.nn.Conv2d(in_channels=NUM_SECOND_FILTERS, out_channels=NUM_THIRD_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn4 = torch.nn.Conv2d(in_channels=NUM_THIRD_FILTERS, out_channels=NUM_FOURTH_FILTERS, kernel_size=3, stride=1, padding=1)
-        self.fc1 = torch.nn.Linear(1250 * NUM_FOURTH_FILTERS, numLanguages)
+        self.fc1 = torch.nn.Linear(688 * NUM_FOURTH_FILTERS, numLanguages)
         self.batchNorm1 = torch.nn.BatchNorm2d(NUM_FILTERS)
         self.batchNorm2 = torch.nn.BatchNorm2d(NUM_SECOND_FILTERS)
         self.batchNorm3 = torch.nn.BatchNorm2d(NUM_THIRD_FILTERS)
@@ -76,7 +79,7 @@ class Model(torch.nn.Module):
                 losses.append(loss.item())
                 loss.backward()
                 optimizer.step()
-            print(f'Epoch [%d/{NUM_EPOCHS}], Loss: %.4f' % (epoch+1, loss.item()))
+            print(f'Epoch [%d/{NUM_EPOCHS}], Loss: %.5f' % (epoch+1, loss.item()))
         return losses
 
         
@@ -95,23 +98,63 @@ class Model(torch.nn.Module):
                 correct += (predicted == testLabels).sum().item()
         print(f'Accuracy of the network on the test data: {100 * correct/total}')
         return 100 * correct / total
+    
+    
+    def spectrogramFeatures(self, x):
+        x = x.to(device)
+        x = self.cnn1(x)
+        plotSpectrogram(x[0][3].detach().cpu().numpy())
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm1(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.cnn2(x)
+        plotSpectrogram(x[0][3].detach().cpu().numpy())
+        spectrogramToAudio(x[0][3].detach().cpu().numpy(), factor=2)
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm2(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.cnn3(x)
+        plotSpectrogram(x[0][3].detach().cpu().numpy())
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm3(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.cnn4(x)
+        plotSpectrogram(x[0][3].detach().cpu().numpy())
+        x = torch.nn.functional.relu(x)
+        x = self.batchNorm4(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = x.reshape(x.size(0), -1)
+        x = self.fc1(x)
 
 
 def transformAudio(audio, samplingRate):
-    nperseg = 4000
-    noverlap = 2000
-    win = ('gaussian', 1e-2 * samplingRate)
-    SFT = ShortTimeFFT.from_window(win, samplingRate, nperseg, noverlap, fft_mode='centered',
+    # before, nperseg was different from this, but they are supposed to be the same. perhaps this will help
+    win = ('gaussian', NPERSEG)
+    SFT = ShortTimeFFT.from_window(win, samplingRate, NPERSEG, NOVERLAP, fft_mode='onesided',
                                scale_to='magnitude', phase_shift=None)
     transformed = SFT.stft(audio)
+    print(transformed.shape)
     return transformed
 
 
+def plotSpectrogram(image):
+    fig1, axx = plt.subplots(1, 1, sharex='all', sharey='all',
+                            figsize=(6., 5.))  # enlarge figure a bit
+    axx.set_title(r"ShortTimeFFT produces $%d\times%d$ points" % image.shape)
+    axx.set_xlabel(r"Time $t$ in seconds")
+    # Calculate extent of plot with centered bins since
+    # imshow does not interpolate by default:
+    extent1 = [0, 11, 0, 8000]
+    kw = dict(origin='lower', aspect='auto', cmap='viridis')
+    im1b = axx.imshow(abs(image), extent=extent1, **kw)
+    fig1.colorbar(im1b, ax=axx, label="Magnitude $|S_z(t, f)|$")
+    _ = fig1.supylabel(r"Frequency $f$ in Hertz", x=0.08, y=0.5, fontsize='medium')
+    plt.show()
+
+
 def plotSpectrogramFromFFT(audio, samplingRate): 
-    nperseg = 4000
-    noverlap = 2000
-    win = ('gaussian', 1e-2 * samplingRate)
-    SFT = ShortTimeFFT.from_window(win, samplingRate, nperseg, noverlap, fft_mode='centered',
+    win = ('gaussian', NPERSEG)
+    SFT = ShortTimeFFT.from_window(win, samplingRate, NPERSEG, NOVERLAP, fft_mode='onesided',
                                scale_to='magnitude', phase_shift=None)
     transformed = SFT.stft(audio)
     N = len(audio)
@@ -131,14 +174,24 @@ def plotSpectrogramFromFFT(audio, samplingRate):
     plt.show()
 
 
-def spectrogramToAudio(spectrogram):
-    audio_signal = librosa.core.spectrum.griffinlim(spectrogram, dtype=np.float32)
-    audio_signal = audio_signal 
-    print("reconstructed audio:", audio_signal)
-    scipy.io.wavfile.write('reconstructed_audio.wav', 16000, audio_signal)
+def plotAudio(audio, samplingRate):
+    plt.plot(audio)
+    plt.xticks(np.arange(0, len(audio), samplingRate), np.arange(0, len(audio)/samplingRate, 1))
+    plt.xlabel('Time')
+    plt.ylabel('Amplitude')
+    plt.show()
 
 
-def createDataloader(data):
+def spectrogramToAudio(spectrogram, factor=1):
+    # inverse short time fourier transform
+    win = ('gaussian', NPERSEG/factor)
+    _, audio_signal = istft(spectrogram, fs=SAMPLING_RATE, nperseg=(NPERSEG-2)/factor, noverlap=NOVERLAP/factor, input_onesided=True, window=win)
+    audio_signal = np.where(np.abs(audio_signal) >= np.max(audio_signal)/100, audio_signal, 0)
+    plotAudio(abs(audio_signal), SAMPLING_RATE)
+    scipy.io.wavfile.write('reconstructed_audio.wav', SAMPLING_RATE, audio_signal.astype(np.float32))
+
+
+def createDataloader(data, batch_size=BATCH_SIZE):
     arrays = []
     labels = []
     # max seconds 
@@ -166,8 +219,8 @@ def createDataloader(data):
     trainData = torch.utils.data.TensorDataset(xTrain, yTrain) # type: ignore
     testData = torch.utils.data.TensorDataset(xTest, yTest) # type: ignore
         
-    trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=BATCH_SIZE, shuffle=True) # type: ignore
-    testLoader = torch.utils.data.DataLoader(dataset=testData, batch_size=BATCH_SIZE, shuffle=False) # type: ignore
+    trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=batch_size, shuffle=True) # type: ignore
+    testLoader = torch.utils.data.DataLoader(dataset=testData, batch_size=batch_size, shuffle=False) # type: ignore
     return (trainLoader, testLoader)
 
 
@@ -217,7 +270,8 @@ def evaluateAudio(model, audio, samplingRate):
 
 def classifyMicrophoneInput(model):
     audio = audioInput.audioInputUserChoice()
-    return evaluateAudio(model, audio, 16000)
+    plotAudio(audio, SAMPLING_RATE)
+    return evaluateAudio(model, audio, SAMPLING_RATE)
 
 
 def saveResults(model, accuracy):
@@ -252,9 +306,58 @@ def mainTrain():
     saveResults(model, accuracy)
 
 
-def main():
+def testModel():
     model = loadModel()
+    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
+    fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
+    fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train', trust_remote_code=True)
+    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
+    trainLoader, testLoader = createDataloader(data, batch_size=1)
+    for _, (trainData, trainLabels) in enumerate(trainLoader, 0):
+        trainData, trainLabels = trainData.to(device), trainLabels.to(device)
+        trainData = trainData.unsqueeze(1)
+        model.spectrogramFeatures(trainData)
+        break
+
+
+def featurizeInput(model, audio, samplingRate):
+    transformed = transformAudio(audio, samplingRate)
+    transformed = torch.tensor(abs(transformed)).type(torch.float32)
+    plotSpectrogram(transformed)
+    transformed = transformed.unsqueeze(0).unsqueeze(1)
+    transformed.to(device)
+    return model.spectrogramFeatures(transformed)
+
+
+def testAudioConversion():
+    audio = audioInput.audioInputUserChoice()
+    plotAudio(audio, 16000)
+    transformed = transformAudio(audio, SAMPLING_RATE)
+    plotSpectrogram(transformed)
+    spectrogramToAudio(transformed)
+
+
+def beforeAfterGraph():
+    audio = audioInput.audioInputUserChoice()
+    fig, axs = plt.subplots(2)
+    axs[0].plot(audio)
+    axs[0].set_title('Before')
+    transformed = transformAudio(audio, SAMPLING_RATE)
+    spectrogramToAudio(transformed)
+    plt.show()
+
+
+def main():
+    # mainTrain()
+    model = loadModel()
+    model.to(device)
     print(classifyMicrophoneInput(model))
+    #audio = audioInput.audioInputUserChoice()
+    #features = featurizeInput(model, audio, SAMPLING_RATE)
+    #testModel()
+    #beforeAfterGraph()
+    #testAudioConversion()
+
 
 
 if __name__ == '__main__':
