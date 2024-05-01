@@ -1,21 +1,17 @@
 from datasets import load_dataset, concatenate_datasets
 import torch
-from torch.utils.data import Dataset
 import numpy as np
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 import json
-import librosa
 import scipy
 import audioInputUserChoice as audioInput
-import pyaudio
-import soundfile as sf
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
 
 BATCH_SIZE = 16
-NUM_EPOCHS = 5
+NUM_EPOCHS = 10
 MAX_LENGTH = 16000 * 11
 LEARNING_RATE = 0.001
 NUM_FILTERS = 16
@@ -25,12 +21,13 @@ NUM_FOURTH_FILTERS = 128
 SAMPLING_RATE = 16000
 NPERSEG = 256
 NOVERLAP = 128
+NUM_INCHANNELS = 2
 LANGUAGES = ['Korean', 'English', 'Spanish']
 
 class Model(torch.nn.Module):
     def __init__(self, numLanguages):
         super(Model, self).__init__()
-        self.cnn1 = torch.nn.Conv2d(in_channels=1, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
+        self.cnn1 = torch.nn.Conv2d(in_channels=NUM_INCHANNELS, out_channels=NUM_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn2 = torch.nn.Conv2d(in_channels=NUM_FILTERS, out_channels=NUM_SECOND_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn3 = torch.nn.Conv2d(in_channels=NUM_SECOND_FILTERS, out_channels=NUM_THIRD_FILTERS, kernel_size=3, stride=1, padding=1)
         self.cnn4 = torch.nn.Conv2d(in_channels=NUM_THIRD_FILTERS, out_channels=NUM_FOURTH_FILTERS, kernel_size=3, stride=1, padding=1)
@@ -71,7 +68,6 @@ class Model(torch.nn.Module):
             for _, (trainData, trainLabels) in enumerate(trainLoader, 0):
                 trainData, trainLabels = trainData.to(device), trainLabels.to(device)
                 optimizer.zero_grad()
-                trainData = trainData.unsqueeze(1)
                 outputs = self(trainData)
                 trainLabels = trainLabels.squeeze(1)
                 # unclear on shape of outputs and trainLabels, if we need to take argmax of output first
@@ -90,7 +86,6 @@ class Model(torch.nn.Module):
             for data in testLoader:
                 testInputs, testLabels = data
                 testInputs, testLabels = testInputs.to(device), testLabels.to(device)
-                testInputs = testInputs.unsqueeze(1)
                 outputs = self(testInputs)
                 predicted = torch.argmax(outputs, 1)
                 testLabels = testLabels.squeeze(1)
@@ -133,7 +128,6 @@ def transformAudio(audio, samplingRate):
     SFT = ShortTimeFFT.from_window(win, samplingRate, NPERSEG, NOVERLAP, fft_mode='onesided',
                                scale_to='magnitude', phase_shift=None)
     transformed = SFT.stft(audio)
-    print(transformed.shape)
     return transformed
 
 
@@ -204,13 +198,18 @@ def createDataloader(data, batch_size=BATCH_SIZE):
         elif MAX_LENGTH - len(tensor) > 0:
             tensor = torch.nn.functional.pad(tensor, (0, MAX_LENGTH - len(tensor)))
         transformed = transformAudio(tensor, data[i]['audio']['sampling_rate'])
-        arrays.append(torch.tensor(abs(transformed)).type(torch.float32))
+        transformedReal = np.real(transformed)
+        transformedImag = np.imag(transformed)
+        transformedReal = torch.tensor(abs(transformedReal)).type(torch.float32)
+        transformedImag = torch.tensor(abs(transformedImag)).type(torch.float32)
+        arrays.append(torch.stack((transformedReal, transformedImag), 0))
         # labels for languages to indices
         if data[i]['language'] in LANGUAGES:
             labels.append(torch.tensor([LANGUAGES.index(data[i]['language'])]))
         else:
             raise ValueError('Invalid language')    
        
+
     xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=None)
     xTrain = torch.stack(xTrain)
     xTest = torch.stack(xTest)
@@ -257,11 +256,16 @@ def loadModel(languages=LANGUAGES):
 
 def evaluateAudio(model, audio, samplingRate):
     transformed = transformAudio(audio, samplingRate)
-    transformed = torch.tensor(transformed).type(torch.float32)
-    spectrogramToAudio(transformed)
-    transformed = transformed.to(device)
-    transformed = transformed.unsqueeze(0).unsqueeze(1)
-    plotSpectrogramFromFFT(audio, samplingRate)
+    transformedReal = np.real(transformed)
+    transformedImag = np.imag(transformed)
+    transformedReal = torch.tensor(abs(transformedReal)).type(torch.float32)
+    transformedImag = torch.tensor(abs(transformedImag)).type(torch.float32)
+    plotSpectrogram(transformedReal)
+    plotSpectrogram(transformedImag)
+    transformedReal = transformedReal.to(device)
+    transformedImag = transformedImag.to(device)
+    transformed = torch.stack((transformedReal, transformedImag), 0)
+    transformed = transformed.unsqueeze(0)
     outputs = model(transformed)
     print(outputs)
     predicted = torch.argmax(outputs, 1)
@@ -306,26 +310,15 @@ def mainTrain():
     saveResults(model, accuracy)
 
 
-def testModel():
-    model = loadModel()
-    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
-    fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
-    fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train', trust_remote_code=True)
-    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
-    trainLoader, testLoader = createDataloader(data, batch_size=1)
-    for _, (trainData, trainLabels) in enumerate(trainLoader, 0):
-        trainData, trainLabels = trainData.to(device), trainLabels.to(device)
-        trainData = trainData.unsqueeze(1)
-        model.spectrogramFeatures(trainData)
-        break
-
-
 def featurizeInput(model, audio, samplingRate):
     transformed = transformAudio(audio, samplingRate)
-    transformed = torch.tensor(abs(transformed)).type(torch.float32)
-    plotSpectrogram(transformed)
-    transformed = transformed.unsqueeze(0).unsqueeze(1)
-    transformed.to(device)
+    transformedReal = torch.tensor(abs(np.real(transformed))).type(torch.float32)
+    transformedImag = torch.tensor(abs(np.imag(transformed))).type(torch.float32)
+    plotSpectrogram(transformedReal)
+    transformedReal = transformedReal.to(device)
+    transformedImag = transformedImag.to(device)
+    transformed = torch.stack((transformedReal, transformedImag), 0)
+    transformed = transformed.unsqueeze(0)
     return model.spectrogramFeatures(transformed)
 
 
@@ -348,7 +341,7 @@ def beforeAfterGraph():
 
 
 def main():
-    # mainTrain()
+    #mainTrain()
     model = loadModel()
     model.to(device)
     print(classifyMicrophoneInput(model))
