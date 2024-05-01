@@ -203,7 +203,7 @@ def createDataloader(batch_size=BATCH_SIZE, *data):
         # pad or truncate data to 11 seconds
         audio = data[0][i]['audio']['array']
         audio = augment(samples=audio, sample_rate=16000)
-        tensor = torch.tensor(data[0][i]['audio']['array']).type(torch.float32)
+        tensor = torch.tensor(audio).type(torch.float32)
         if len(tensor) > MAX_LENGTH:
             tensor = tensor[:MAX_LENGTH]
         elif MAX_LENGTH - len(tensor) > 0:
@@ -332,7 +332,11 @@ def mainTrain():
     fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train[:80%]')
     # fleurs_vietnamese = load_dataset('google/fleurs', "vi_vn", split='train', trust_remote_code=True)
 
-    
+    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
+
+    # This entire block can be commented out and common_voice_data deleted when we want to use it or not use it
+    # Also for sake of RAM I have lowered training data amount of fleurs when I use this
+    # Don't know if u need to but yeah
     common_voice_korean = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='train')
     common_voice_korean2 = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='test')
     common_voice_korean3 = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='validation')
@@ -343,9 +347,9 @@ def mainTrain():
     common_voice_korean3 = common_voice_korean3.cast_column("audio", Audio(sampling_rate=16000))
     common_voice_english = common_voice_english.cast_column("audio", Audio(sampling_rate=16000))
     common_voice_spanish = common_voice_spanish.cast_column("audio", Audio(sampling_rate=16000))
-
-    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
     common_voice_data = concatenate_datasets([common_voice_korean, common_voice_korean2, common_voice_korean3, common_voice_english])
+
+
     trainLoader, testLoader = createDataloader(BATCH_SIZE, data, common_voice_data)
 
     model = Model(len(LANGUAGES))
