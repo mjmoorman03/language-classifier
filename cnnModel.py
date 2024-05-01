@@ -1,4 +1,4 @@
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, Audio
 import torch
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -7,6 +7,7 @@ from scipy.signal import stft, istft, spectrogram, ShortTimeFFT
 import json
 import scipy
 import audioInputUserChoice as audioInput
+from audiomentations import Compose, AddGaussianNoise, TimeStretch, PitchShift, Shift, TimeMask
 
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device('cpu')
 
@@ -185,30 +186,61 @@ def spectrogramToAudio(spectrogram, factor=1):
     scipy.io.wavfile.write('reconstructed_audio.wav', SAMPLING_RATE, audio_signal.astype(np.float32))
 
 
-def createDataloader(data, batch_size=BATCH_SIZE):
+def createDataloader(batch_size=BATCH_SIZE, *data):
     arrays = []
     labels = []
+    SAMPLINGRATE = 16000
+    LOCALES = ['ko', 'en', 'es']
+    augment = Compose([
+        AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.5),
+        TimeStretch(min_rate=0.8, max_rate=1.25, p=0.5),
+        PitchShift(min_semitones=-4, max_semitones=4, p=0.5),
+        Shift(min_shift=-0.5, max_shift=0.5, p=0.5),
+        TimeMask( min_band_part=0.1, max_band_part=0.15, fade=True, p=0.5,),
+    ])
     # max seconds 
-    for i in range(len(data)):
+    for i in range(len(data[0])):
         # pad or truncate data to 11 seconds
-        scipy.io.wavfile.write('audio.wav', 16000, data[i]['audio']['array'])
-        tensor = torch.tensor(data[i]['audio']['array']).type(torch.float32)
+        audio = data[0][i]['audio']['array']
+        audio = augment(samples=audio, sample_rate=16000)
+        tensor = torch.tensor(data[0][i]['audio']['array']).type(torch.float32)
         if len(tensor) > MAX_LENGTH:
             tensor = tensor[:MAX_LENGTH]
         elif MAX_LENGTH - len(tensor) > 0:
             tensor = torch.nn.functional.pad(tensor, (0, MAX_LENGTH - len(tensor)))
-        transformed = transformAudio(tensor, data[i]['audio']['sampling_rate'])
+        transformed = transformAudio(tensor, data[0][i]['audio']['sampling_rate'])
         transformedReal = np.real(transformed)
         transformedImag = np.imag(transformed)
         transformedReal = torch.tensor(abs(transformedReal)).type(torch.float32)
         transformedImag = torch.tensor(abs(transformedImag)).type(torch.float32)
         arrays.append(torch.stack((transformedReal, transformedImag), 0))
         # labels for languages to indices
-        if data[i]['language'] in LANGUAGES:
-            labels.append(torch.tensor([LANGUAGES.index(data[i]['language'])]))
+        if data[0][i]['language'] in LANGUAGES:
+            labels.append(torch.tensor([LANGUAGES.index(data[0][i]['language'])]))
         else:
             raise ValueError('Invalid language')    
-       
+    
+    if (data[1]):
+        for i in range(len(data[1])):
+            # pad or truncate data to 11 seconds
+            audio = data[1][i]['audio']['array']
+            audio = augment(samples=audio, sample_rate=16000)
+            tensor = torch.tensor(audio).type(torch.float32)
+            if len(tensor) > MAX_LENGTH:
+                tensor = tensor[:MAX_LENGTH]
+            elif MAX_LENGTH - len(tensor) > 0:
+                tensor = torch.nn.functional.pad(tensor, (0, MAX_LENGTH - len(tensor)))
+            transformed = transformAudio(tensor, SAMPLINGRATE)
+            transformedReal = np.real(transformed)
+            transformedImag = np.imag(transformed)
+            transformedReal = torch.tensor(abs(transformedReal)).type(torch.float32)
+            transformedImag = torch.tensor(abs(transformedImag)).type(torch.float32)
+            arrays.append(torch.stack((transformedReal, transformedImag), 0))
+            # labels for languages to indices
+            if data[1][i]['locale'] in LOCALES:
+                labels.append(torch.tensor([LOCALES.index(data[1][i]['locale'])]))
+            else:
+                raise ValueError('Invalid language')
 
     xTrain, xTest, yTrain, yTest = train_test_split(arrays, labels, test_size=0.15, random_state=None)
     xTrain = torch.stack(xTrain)
@@ -295,13 +327,27 @@ def saveResults(model, accuracy):
 
 
 def mainTrain():
-    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train', trust_remote_code=True) # type: ignore
-    fleurs_english = load_dataset('google/fleurs', "en_us", split='train', trust_remote_code=True) 
-    fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train', trust_remote_code=True)
+    fleurs_korean = load_dataset('google/fleurs', "ko_kr", split='train[:80%]') # type: ignore
+    fleurs_english = load_dataset('google/fleurs', "en_us", split='train[:80%]') 
+    fleurs_spanish = load_dataset('google/fleurs', "es_419", split='train[:80%]')
     # fleurs_vietnamese = load_dataset('google/fleurs', "vi_vn", split='train', trust_remote_code=True)
-    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
-    trainLoader, testLoader = createDataloader(data)
+
     
+    common_voice_korean = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='train')
+    common_voice_korean2 = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='test')
+    common_voice_korean3 = load_dataset('mozilla-foundation/common_voice_13_0', "ko", split='validation')
+    common_voice_english = load_dataset('mozilla-foundation/common_voice_13_0', "en", split='test[:10%]')
+    common_voice_spanish = load_dataset('mozilla-foundation/common_voice_13_0', "es", split='test[:10%]')
+    common_voice_korean = common_voice_korean.cast_column("audio", Audio(sampling_rate=16000))
+    common_voice_korean2 = common_voice_korean2.cast_column("audio", Audio(sampling_rate=16000))
+    common_voice_korean3 = common_voice_korean3.cast_column("audio", Audio(sampling_rate=16000))
+    common_voice_english = common_voice_english.cast_column("audio", Audio(sampling_rate=16000))
+    common_voice_spanish = common_voice_spanish.cast_column("audio", Audio(sampling_rate=16000))
+
+    data = concatenate_datasets([fleurs_korean, fleurs_english, fleurs_spanish]) # type: ignore
+    common_voice_data = concatenate_datasets([common_voice_korean, common_voice_korean2, common_voice_korean3, common_voice_english])
+    trainLoader, testLoader = createDataloader(BATCH_SIZE, data, common_voice_data)
+
     model = Model(len(LANGUAGES))
     model.to(device)
     model.trainFunction(trainLoader)
@@ -341,10 +387,10 @@ def beforeAfterGraph():
 
 
 def main():
-    #mainTrain()
-    model = loadModel()
-    model.to(device)
-    print(classifyMicrophoneInput(model))
+    mainTrain()
+    # model = loadModel()
+    # model.to(device)
+    # print(classifyMicrophoneInput(model))
     #audio = audioInput.audioInputUserChoice()
     #features = featurizeInput(model, audio, SAMPLING_RATE)
     #testModel()
